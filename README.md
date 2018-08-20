@@ -18,4 +18,4 @@ Just add the following to your homebridge `config.json`
 - Turn auto mode on/off and set target temperature
 - Supports having multiple devices
 
-Unfortunately there's currently no way to control energy saving mode nor frost settings due to HAP protocol limitations
+Unfortunately there's currently no way to control energy saving mode, holiday schedule, daily program, nor frost settings due to HAP protocol limitations
