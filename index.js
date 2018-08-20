@@ -16,7 +16,7 @@ module.exports = function(homebridge) {
       this.log = log;
       this.accessories = [];
 
-      this.config = config || {};
+      this.config = config = (config || {});
       config.username = config.username || process.env.SALUS_USERNAME;
       config.password = config.password || process.env.SALUS_PASSWORD;
 
@@ -36,8 +36,8 @@ module.exports = function(homebridge) {
 
       this.loginPromise = (async () => {
         try {
-          this.log("Logging in as " + process.env.SALUS_USERNAME);
-          const {sessionId, token} = await API.login({username: process.env.SALUS_USERNAME, password: process.env.SALUS_PASSWORD});
+          this.log("Logging in as " + config.username);
+          const {sessionId, token} = await API.login({username: config.username, password: config.password});
 
           this.sessionId = sessionId;
           this.token = token;
