@@ -47,21 +47,31 @@ class API {
       return true;
     }
 
+    // Keep track of pending requests to avoid multiple simultanous network calls
+    this._pendingSessionCheck = null;
     this._checkSession = async () => {
-      const response = await rp({
-        url: 'https://salus-it500.com/public/devices.php',
-        headers: {
-          'Cookie': 'PHPSESSID='+this.sessionId,
-        },
-        followRedirect: false,
-        resolveWithFullResponse: true,
-        simple: false,
-      });
+      if (this._pendingSessionCheck) return this._pendingSessionCheck;
 
-      // session expired
-      if (response.statusCode === 302 && response.headers.location.includes('login.php')) {
-        await this.login(this._credentials)
-      }
+      const promise = (async () => {
+        const response = await rp({
+          url: 'https://salus-it500.com/public/devices.php',
+          headers: {
+            'Cookie': 'PHPSESSID='+this.sessionId,
+          },
+          followRedirect: false,
+          resolveWithFullResponse: true,
+          simple: false,
+        });
+
+        // session expired
+        if (response.statusCode === 302 && response.headers.location.includes('login.php')) {
+          await this.login(this._credentials)
+        }
+      })()
+
+      this._pendingSessionCheck = promise;
+      try {await promise}
+      finally {this._pendingSessionCheck = null}
     }
 
     this.getDevices = async () => {
@@ -102,34 +112,51 @@ class API {
       }
     }
 
+    // Keep a list of pending requests to avoid multiple simultanous network calls
+    this._loadingDeviceValues = {};
+    this.cachedDeviceValues = {};
+
     this.getDeviceValues = async ({deviceId}) => {
-      await this._checkSession();
-
-      const json = await rp({
-        url: 'https://salus-it500.com/public/ajax_device_values.php?devId='+deviceId+'&token='+this.token,
-        headers: {
-          'Cookie': 'PHPSESSID='+this.sessionId,
-        },
-        json: true,
-      });
-
-      if (json.tempUnit != 0) {
-        console.warn('Unexpected temp unit: ' + JSON.stringify(json.tempUnit));
+      if (this._loadingDeviceValues[deviceId]) {
+        return this._loadingDeviceValues[deviceId];
       }
 
-      const values = {
-        currentRoomTemperature: parseFloat(json.CH1currentRoomTemp),
-        currentTargetTemperature: parseFloat(json.CH1currentSetPoint),
-        autoMode: json.CH1autoOff == 0,
-        energySaving: json.esStatus == 1,
-        isHeating: json.CH1heatOnOffStatus == 1,
-        temperatureUnit: json.tempUnit == 0 ? 'C' : 'F',
-      };
-      // console.log(values);
+      const promise = (async () => {
+        await this._checkSession();
 
-      return values;
+        const json = await rp({
+          url: 'https://salus-it500.com/public/ajax_device_values.php?devId='+deviceId+'&token='+this.token,
+          headers: {
+            'Cookie': 'PHPSESSID='+this.sessionId,
+          },
+          json: true,
+        });
+
+        if (json.tempUnit != 0) {
+          console.warn('Unexpected temp unit: ' + JSON.stringify(json.tempUnit));
+        }
+
+        const values = {
+          currentRoomTemperature: parseFloat(json.CH1currentRoomTemp),
+          currentTargetTemperature: parseFloat(json.CH1currentSetPoint),
+          autoMode: json.CH1autoOff == 0,
+          energySaving: json.esStatus == 1,
+          isHeating: json.CH1heatOnOffStatus == 1,
+          temperatureUnit: json.tempUnit == 0 ? 'C' : 'F',
+        };
+        // console.log(values);
+
+        return values;
+      })()
+
+      this._loadingDeviceValues[deviceId] = promise;
+
+      try {
+        return (this.cachedDeviceValues[deviceId] = await promise);
+      } finally {
+        this._loadingDeviceValues[deviceId] = null;
+      }
     }
-
 
     this.setDeviceValues = async ({deviceId, autoMode, energySaving, targetTemperature}) => {
       await this._checkSession();
@@ -163,7 +190,7 @@ class API {
         },
       });
 
-      return this.getDeviceValues({sessionId, token, deviceId})
+      return this.getDeviceValues({deviceId})
     }
   }
 }

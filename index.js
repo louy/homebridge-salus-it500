@@ -4,7 +4,7 @@ const client = new API;
 module.exports = function(homebridge) {
   // console.log("homebridge API version: " + homebridge.version);
 
-  const {platformAccessory: Accessory, hap: {Service, Characteristic, uuid: UUIDGen}} = homebridge;
+  const {platformAccessory: PlatformAccessory, hap: {Service, Characteristic, Accessory, uuid: UUIDGen}} = homebridge;
 
   class SalusIT500 {
     constructor(log, config, api) {
@@ -45,7 +45,7 @@ module.exports = function(homebridge) {
       if (!await this.loginPromise) return;
 
       this.api.unregisterPlatformAccessories("homebridge-salus-it500", "SalusIT500", this.accessories);
-      this.accessories=[]
+      this.accessories = []
 
       // discover devices
       const devices = await client.getDevices()
@@ -58,7 +58,7 @@ module.exports = function(homebridge) {
         if (registeredAccessory) {
           registeredAccessory.updateReachability(true);
         } else {
-          const newAccessory = new Accessory(device.name, uuid);
+          const newAccessory = new PlatformAccessory(device.name, uuid, Accessory.Categories.THERMOSTAT);
 
           newAccessory.context.deviceId = device.id;
           newAccessory.context.serial = device.serial;
@@ -88,28 +88,17 @@ module.exports = function(homebridge) {
       });
 
       const batteryService = accessory.getService(Service.BatteryService) ||
-                             accessory.addService(Service.BatteryService, "Thermostat");
+                             accessory.addService(Service.BatteryService);
 
-     batteryService
-       .setCharacteristic(Characteristic.ChargingState, Characteristic.ChargingState.NOT_CHARGEABLE)
+      batteryService
+        .setCharacteristic(Characteristic.ChargingState, Characteristic.ChargingState.NOT_CHARGEABLE)
 
       batteryService
         .getCharacteristic(Characteristic.StatusLowBattery)
-        .on('get', (callback) => {
-          platform.log(accessory.displayName, `Get StatusLowBattery`);
-
-          client.getDeviceOnlineStatus({deviceId: accessory.context.deviceId})
-            .then(
-              ({batteryLow}) =>
-                callback(null, batteryLow
-                  ? Characteristic.StatusLowBattery.BATTERY_LEVEL_LOW
-                  : Characteristic.StatusLowBattery.BATTERY_LEVEL_NORMAL),
-              err => callback(err)
-            )
-        });
+        .on('get', getCharacteristicFromDeviceStatus);
 
       const infoService = accessory.getService(Service.AccessoryInformation) ||
-                          accessory.addService(Service.AccessoryInformation, "Thermostat");
+                          accessory.addService(Service.AccessoryInformation);
       infoService
         .setCharacteristic(Characteristic.Manufacturer, "Salus")
         .setCharacteristic(Characteristic.Model, "IT500")
@@ -118,47 +107,26 @@ module.exports = function(homebridge) {
         .setCharacteristic(Characteristic.FirmwareRevision, 'N/A')
 
       const thermostatService = accessory.getService(Service.Thermostat) ||
-                                accessory.addService(Service.Thermostat, "Thermostat");
+                                accessory.addService(Service.Thermostat);
 
       thermostatService
         .getCharacteristic(Characteristic.TemperatureDisplayUnits)
-        .on('get', (callback) => {
-          platform.log(accessory.displayName, `Get TemperatureDisplayUnits`);
-
-          client.getDeviceValues({deviceId: accessory.context.deviceId})
-            .then(
-              ({temperatureUnit}) =>
-                callback(null, temperatureUnit === 'C'
-                  ? Characteristic.TemperatureDisplayUnits.CELSIUS
-                  : Characteristic.TemperatureDisplayUnits.FAHRENHEIT),
-              err => callback(err)
-            )
+        .setProps({
+          perms: [Characteristic.Perms.READ, Characteristic.Perms.NOTIFY],
         })
-        .on('set', (value, callback) => callback(new Error('Not implemented')));
+        .on('get', getCharacteristicFromDeviceValue)
 
       thermostatService
         .getCharacteristic(Characteristic.CurrentTemperature)
-        .on('get', (callback) => {
-          platform.log(accessory.displayName, `Get CurrentTemperature`);
-
-          client.getDeviceValues({deviceId: accessory.context.deviceId})
-            .then(
-              ({currentRoomTemperature}) => callback(null, currentRoomTemperature),
-              err => callback(err)
-            )
-        });
+        .on('get', getCharacteristicFromDeviceValue);
 
       thermostatService
         .getCharacteristic(Characteristic.TargetTemperature)
-        .on('get', (callback) => {
-          platform.log(accessory.displayName, `Get TargetTemperature`);
-
-          client.getDeviceValues({deviceId: accessory.context.deviceId})
-            .then(
-              ({currentTargetTemperature}) => callback(null, currentTargetTemperature),
-              err => callback(err)
-            )
+        .setProps({
+          minValue: 5,
+          maxValue: 35,
         })
+        .on('get', getCharacteristicFromDeviceValue)
         .on('set', (value, callback) => {
           platform.log(accessory.displayName, `Set TargetTemperature`, value);
 
@@ -166,54 +134,123 @@ module.exports = function(homebridge) {
             deviceId: accessory.context.deviceId,
             targetTemperature: value,
           })
+            .then(updateDeviceValues)
             .then(
               () => callback(),
-              err => callback(err)
+              err => {console.error(err); callback(err)}
             )
         });
 
       thermostatService
         .getCharacteristic(Characteristic.TargetHeatingCoolingState)
-        .on('get', (callback) => {
-          platform.log(accessory.displayName, `Get TargetHeatingCoolingState`);
-
-          client.getDeviceValues({deviceId: accessory.context.deviceId})
-            .then(
-              ({autoMode}) =>
-                callback(null, autoMode
-                  ? Characteristic.TargetHeatingCoolingState.AUTO
-                  : Characteristic.TargetHeatingCoolingState.OFF),
-              err => callback(err)
-            )
+        .setProps({
+          validValues: [
+            Characteristic.TargetHeatingCoolingState.AUTO,
+            Characteristic.TargetHeatingCoolingState.OFF,
+          ],
         })
+        .on('get', getCharacteristicFromDeviceValue)
         .on('set', (value, callback) => {
           platform.log(accessory.displayName, `Set TargetHeatingCoolingState`, value);
 
           client.setDeviceValues({
             deviceId: accessory.context.deviceId,
-            autoMode: value === Characteristic.TargetHeatingCoolingState.AUTO || value === Characteristic.TargetHeatingCoolingState.HEAT
+            autoMode: value === Characteristic.TargetHeatingCoolingState.AUTO
           })
+            .then(updateDeviceValues)
             .then(
               () => callback(),
-              err => callback(err)
+              err => {console.error(err); callback(err)}
             )
         });
 
       thermostatService
         .getCharacteristic(Characteristic.CurrentHeatingCoolingState)
-        .on('get', (callback) => {
-          platform.log(accessory.displayName, `Get CurrentHeatingCoolingState`);
+        .on('get', getCharacteristicFromDeviceValue);
 
-          client.getDeviceValues({deviceId: accessory.context.deviceId})
-            .then(
-              ({isHeating}) =>
-                callback(null, isHeating
-                  ? Characteristic.CurrentHeatingCoolingState.HEAT
-                  : Characteristic.CurrentHeatingCoolingState.OFF),
-              err => callback(err)
-            )
-        })
-        .on('set', (value, callback) => callback(new Error('Not implemented')));
+      function updateDeviceValues(values) {
+        const {
+          isHeating,
+          autoMode,
+          currentRoomTemperature,
+          temperatureUnit,
+          currentTargetTemperature,
+        } = values;
+
+        thermostatService
+          .getCharacteristic(Characteristic.CurrentHeatingCoolingState)
+          .updateValue(
+            isHeating
+              ? Characteristic.CurrentHeatingCoolingState.HEAT
+              : Characteristic.CurrentHeatingCoolingState.OFF
+          );
+
+        thermostatService
+          .getCharacteristic(Characteristic.TargetHeatingCoolingState)
+          .updateValue(
+            autoMode
+              ? Characteristic.TargetHeatingCoolingState.AUTO
+              : Characteristic.TargetHeatingCoolingState.OFF
+          );
+
+        thermostatService
+          .getCharacteristic(Characteristic.CurrentTemperature)
+          .updateValue(currentRoomTemperature);
+
+        thermostatService
+          .getCharacteristic(Characteristic.TemperatureDisplayUnits)
+          .updateValue(
+            temperatureUnit === 'C'
+              ? Characteristic.TemperatureDisplayUnits.CELSIUS
+              : Characteristic.TemperatureDisplayUnits.FAHRENHEIT
+          );
+
+        thermostatService
+          .getCharacteristic(Characteristic.TargetTemperature)
+          .updateValue(currentTargetTemperature);
+      }
+
+      async function loadDeviceValues() {
+        updateDeviceValues(
+          await client.getDeviceValues({deviceId: accessory.context.deviceId})
+        );
+      }
+
+      function getCharacteristicFromDeviceValue(callback) {
+        loadDeviceValues()
+          .then(
+            () => callback(null, this.value),
+            err => {console.error(err); callback(err)}
+          );
+      }
+
+      function updateDeviceStatus(status) {
+        const {
+          batteryLow,
+        } = status;
+
+        batteryService
+          .getCharacteristic(Characteristic.StatusLowBattery)
+          .updateValue(
+            batteryLow
+              ? Characteristic.StatusLowBattery.BATTERY_LEVEL_LOW
+              : Characteristic.StatusLowBattery.BATTERY_LEVEL_NORMAL
+          );
+      }
+
+      async function loadDeviceStatus() {
+        updateDeviceStatus(
+          await client.getDeviceOnlineStatus({deviceId: accessory.context.deviceId})
+        );
+      }
+
+      function getCharacteristicFromDeviceStatus(callback) {
+        loadDeviceStatus()
+          .then(
+            () => callback(null, this.value),
+            err => {console.error(err); callback(err)}
+          );
+      }
 
       this.accessories.push(accessory);
     }
