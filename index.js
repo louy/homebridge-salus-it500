@@ -1,12 +1,6 @@
 var http = require('http');
 var API = require('./api');
 
-for (const key of ['SALUS_USERNAME','SALUS_PASSWORD']) {
-  if (!process.env[key]) {
-    throw new Error('Missing required env variable: '+key);
-  }
-}
-
 module.exports = function(homebridge) {
   // console.log("homebridge API version: " + homebridge.version);
 
@@ -20,8 +14,17 @@ module.exports = function(homebridge) {
       log("SalusIT500 Init");
       const platform = this;
       this.log = log;
-      this.config = config;
       this.accessories = [];
+
+      this.config = config || {};
+      config.username = config.username || process.env.SALUS_USERNAME;
+      config.password = config.password || process.env.SALUS_PASSWORD;
+
+      for (const key of ['username','password']) {
+        if (!config[key]) {
+          throw new Error('Missing config key: '+key);
+        }
+      }
 
       // Save the API object as plugin needs to register new accessory via this object
       this.api = api;
@@ -81,7 +84,6 @@ module.exports = function(homebridge) {
     // Developer can configure accessory at here (like setup event handler).
     // Update current value.
     async configureAccessory(accessory) {
-      this.log(Object.keys(accessory).join(','));
       this.log(accessory.displayName, "Configure Accessory");
       if (!await this.loginPromise) return;
 
