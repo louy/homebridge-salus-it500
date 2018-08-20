@@ -1,14 +1,11 @@
-var http = require('http');
-var API = require('./api');
+const API = require('./api');
+const client = new API;
 
 module.exports = function(homebridge) {
   // console.log("homebridge API version: " + homebridge.version);
 
   const {platformAccessory: Accessory, hap: {Service, Characteristic, uuid: UUIDGen}} = homebridge;
 
-  // Platform constructor
-  // config may be null
-  // api may be null if launched from old homebridge version
   class SalusIT500 {
     constructor(log, config, api) {
       log("SalusIT500 Init");
@@ -26,22 +23,15 @@ module.exports = function(homebridge) {
         }
       }
 
-      // Save the API object as plugin needs to register new accessory via this object
       this.api = api;
 
-      // Listen to event "didFinishLaunching", this means homebridge already finished loading cached accessories.
-      // Platform Plugin should only register new accessory that doesn't exist in homebridge after this event.
-      // Or start discover new accessories.
       this.api.on('didFinishLaunching', () => this.didFinishLaunching());
 
       this.loginPromise = (async () => {
         try {
           this.log("Logging in as " + config.username);
-          const {sessionId, token} = await API.login({username: config.username, password: config.password});
-
-          this.sessionId = sessionId;
-          this.token = token;
-          this.log("Login successful", {sessionId, token});
+          await client.login({username: config.username, password: config.password});
+          this.log("Login successful");
           return true
         } catch (error) {
           this.log('Login error: ' + error)
@@ -58,7 +48,7 @@ module.exports = function(homebridge) {
       this.accessories=[]
 
       // discover devices
-      const devices = await API.getDevices({sessionId: this.sessionId})
+      const devices = await client.getDevices()
       this.log('Found ' + devices.length + ' devices');
 
       for (const device of devices) {
@@ -108,7 +98,7 @@ module.exports = function(homebridge) {
         .on('get', (callback) => {
           platform.log(accessory.displayName, `Get StatusLowBattery`);
 
-          API.getDeviceOnlineStatus({sessionId: this.sessionId, token: this.token, deviceId: accessory.context.deviceId})
+          client.getDeviceOnlineStatus({deviceId: accessory.context.deviceId})
             .then(
               ({batteryLow}) =>
                 callback(null, batteryLow
@@ -135,7 +125,7 @@ module.exports = function(homebridge) {
         .on('get', (callback) => {
           platform.log(accessory.displayName, `Get TemperatureDisplayUnits`);
 
-          API.getDeviceValues({sessionId: this.sessionId, token: this.token, deviceId: accessory.context.deviceId})
+          client.getDeviceValues({deviceId: accessory.context.deviceId})
             .then(
               ({temperatureUnit}) =>
                 callback(null, temperatureUnit === 'C'
@@ -151,7 +141,7 @@ module.exports = function(homebridge) {
         .on('get', (callback) => {
           platform.log(accessory.displayName, `Get CurrentTemperature`);
 
-          API.getDeviceValues({sessionId: this.sessionId, token: this.token, deviceId: accessory.context.deviceId})
+          client.getDeviceValues({deviceId: accessory.context.deviceId})
             .then(
               ({currentRoomTemperature}) => callback(null, currentRoomTemperature),
               err => callback(err)
@@ -163,7 +153,7 @@ module.exports = function(homebridge) {
         .on('get', (callback) => {
           platform.log(accessory.displayName, `Get TargetTemperature`);
 
-          API.getDeviceValues({sessionId: this.sessionId, token: this.token, deviceId: accessory.context.deviceId})
+          client.getDeviceValues({deviceId: accessory.context.deviceId})
             .then(
               ({currentTargetTemperature}) => callback(null, currentTargetTemperature),
               err => callback(err)
@@ -172,9 +162,7 @@ module.exports = function(homebridge) {
         .on('set', (value, callback) => {
           platform.log(accessory.displayName, `Set TargetTemperature`, value);
 
-          API.setDeviceValues({
-            sessionId: this.sessionId,
-            token: this.token,
+          client.setDeviceValues({
             deviceId: accessory.context.deviceId,
             targetTemperature: value,
           })
@@ -189,7 +177,7 @@ module.exports = function(homebridge) {
         .on('get', (callback) => {
           platform.log(accessory.displayName, `Get TargetHeatingCoolingState`);
 
-          API.getDeviceValues({sessionId: this.sessionId, token: this.token, deviceId: accessory.context.deviceId})
+          client.getDeviceValues({deviceId: accessory.context.deviceId})
             .then(
               ({autoMode}) =>
                 callback(null, autoMode
@@ -201,9 +189,7 @@ module.exports = function(homebridge) {
         .on('set', (value, callback) => {
           platform.log(accessory.displayName, `Set TargetHeatingCoolingState`, value);
 
-          API.setDeviceValues({
-            sessionId: this.sessionId,
-            token:this.token,
+          client.setDeviceValues({
             deviceId: accessory.context.deviceId,
             autoMode: value === Characteristic.TargetHeatingCoolingState.AUTO || value === Characteristic.TargetHeatingCoolingState.HEAT
           })
@@ -218,7 +204,7 @@ module.exports = function(homebridge) {
         .on('get', (callback) => {
           platform.log(accessory.displayName, `Get CurrentHeatingCoolingState`);
 
-          API.getDeviceValues({sessionId: this.sessionId, token: this.token, deviceId: accessory.context.deviceId})
+          client.getDeviceValues({deviceId: accessory.context.deviceId})
             .then(
               ({isHeating}) =>
                 callback(null, isHeating
